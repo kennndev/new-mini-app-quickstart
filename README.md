@@ -1,133 +1,87 @@
-# Waitlist Mini App Quickstart
+# Cardify Mini App Quickstart
 
-This is a demo Mini App application built using OnchainKit and the Farcaster SDK. Build a waitlist sign-up mini app for your company that can be published to the Base app and Farcaster.
+A Coinbase Base Mini App that lets trainers forge anime-inspired trading cards on Base Sepolia. This project builds on the official Mini App quickstart (Next.js + OnchainKit) and swaps the waitlist flow for the Cardify experience: wallet contextualization, image generation through OpenAI, and a downloadable card preview.
+
+## Features
+
+- Coinbase Mini App ready UI rendered via Next.js App Router.
+- Wallet detection for `coinbaseWalletMiniApp` (with EVM fallback) and Base Sepolia network checks.
+- Fixed Pokémon-style frame/art direction with dynamic stats, levels, and forge hash.
+- Serverless `/api/generate` route that proxies the OpenAI Images API (`gpt-image-1`) using `OPENAI_API_KEY`.
+- Download button to save the generated card PNG.
+- `.well-known/baseMiniAppManifest.json` served from the App Router for Base Mini App preview tooling.
 
 ## Prerequisites
 
-Before getting started, make sure you have:
-
-* Base app account
-* A [Farcaster](https://farcaster.xyz/) account
-* [Vercel](https://vercel.com/) account for hosting the application
-* [Coinbase Developer Platform](https://portal.cdp.coinbase.com/) Client API Key
+- Node.js 18+
+- Coinbase Base app (or Coinbase Wallet) to preview the Mini App
+- OpenAI API key with Images API access
+- (Optional) Vercel CLI for one-click deploys
 
 ## Getting Started
 
-### 1. Clone this repository 
+1. **Install dependencies**
 
-```bash
-git clone https://github.com/base/demos.git
+   ```bash
+   npm install
+   ```
+
+2. **Configure environment variables**
+
+   Create a `.env.local` file in the project root:
+
+   ```bash
+   OPENAI_API_KEY=sk-your-openai-key
+   NEXT_PUBLIC_URL=http://localhost:3000
+   ```
+
+   Set `NEXT_PUBLIC_URL` to your deployed HTTPS domain when you publish.
+
+3. **Run locally**
+
+   ```bash
+   npm run dev
+   ```
+
+   Tunnel the dev server (default `http://localhost:3000`) through an HTTPS service such as ngrok when testing inside the Coinbase app.
+
+4. **Forge a card**
+
+   - Press **Connect Wallet** inside the mini app to link a Base Sepolia wallet.
+   - Provide a creature name, choose an element type, and describe a signature move.
+   - Click **Forge Creature**. Once the image is generated you can download the PNG.
+
+## Manifest & Branding
+
+- The Base Mini App manifest is served from `app/.well-known/baseMiniAppManifest.json/route.ts`. Update the hard-coded URLs to match your deployed domain and assets.
+- Farcaster metadata lives in `minikit.config.ts`; adjust the name, subtitle, splash images, and screenshot references there. Upload new assets under `public/`.
+
+## Deployment (Vercel)
+
+1. Push the repository to a Git provider connected to Vercel.
+2. Set the environment variables in Vercel (`OPENAI_API_KEY`, `NEXT_PUBLIC_URL`).
+3. Deploy with `vercel --prod`.
+4. Update `NEXT_PUBLIC_URL` locally (and in Vercel) to the production domain so the manifest and metadata resolve correctly.
+
+## File Map
+
+```
+app/
+├── .well-known/baseMiniAppManifest.json/route.ts  # Base Mini App manifest
+├── api/generate/route.ts                         # Serverless OpenAI proxy
+├── globals.css                                   # Global styles
+├── layout.tsx                                    # App layout
+├── page.module.css                               # Cardify UI styles
+└── page.tsx                                      # Main Cardify component
+
+minikit.config.ts                                 # Farcaster/Base metadata
+public/                                           # Shared imagery & icons
 ```
 
-### 2. Install dependencies:
+## Customization Notes
 
-```bash
-cd demos/minikit/waitlist-mini-app-qs
-npm install
-```
-
-### 3. Configure environment variables
-
-Create a `.env.local` file and add your environment variables:
-
-```bash
-NEXT_PUBLIC_PROJECT_NAME="Your App Name"
-NEXT_PUBLIC_ONCHAINKIT_API_KEY=<Replace-WITH-YOUR-CDP-API-KEY>
-NEXT_PUBLIC_URL=
-```
-
-### 4. Run locally:
-
-```bash
-npm run dev
-```
-
-## Customization
-
-### Update Manifest Configuration
-
-The `minikit.config.ts` file configures your manifest located at `app/.well-known/farcaster.json`.
-
-**Skip the `accountAssociation` object for now.**
-
-To personalize your app, change the `name`, `subtitle`, and `description` fields and add images to your `/public` folder. Then update their URLs in the file.
-
-## Deployment
-
-### 1. Deploy to Vercel
-
-```bash
-vercel --prod
-```
-
-You should have a URL deployed to a domain similar to: `https://your-vercel-project-name.vercel.app/`
-
-### 2. Update environment variables
-
-Add your production URL to your local `.env` file:
-
-```bash
-NEXT_PUBLIC_PROJECT_NAME="Your App Name"
-NEXT_PUBLIC_ONCHAINKIT_API_KEY=<Replace-WITH-YOUR-CDP-API-KEY>
-NEXT_PUBLIC_URL=https://your-vercel-project-name.vercel.app/
-```
-
-### 3. Upload environment variables to Vercel
-
-Add environment variables to your production environment:
-
-```bash
-vercel env add NEXT_PUBLIC_PROJECT_NAME production
-vercel env add NEXT_PUBLIC_ONCHAINKIT_API_KEY production
-vercel env add NEXT_PUBLIC_URL production
-```
-
-## Account Association
-
-### 1. Sign Your Manifest
-
-1. Navigate to [Farcaster Manifest tool](https://farcaster.xyz/~/developers/mini-apps/manifest)
-2. Paste your domain in the form field (ex: your-vercel-project-name.vercel.app)
-3. Click the `Generate account association` button and follow the on-screen instructions for signing with your Farcaster wallet
-4. Copy the `accountAssociation` object
-
-### 2. Update Configuration
-
-Update your `minikit.config.ts` file to include the `accountAssociation` object:
-
-```ts
-export const minikitConfig = {
-    accountAssociation: {
-        "header": "your-header-here",
-        "payload": "your-payload-here",
-        "signature": "your-signature-here"
-    },
-    frame: {
-        // ... rest of your frame configuration
-    },
-}
-```
-
-### 3. Deploy Updates
-
-```bash
-vercel --prod
-```
-
-## Testing and Publishing
-
-### 1. Preview Your App
-
-Go to [base.dev/preview](https://base.dev/preview) to validate your app:
-
-1. Add your app URL to view the embeds and click the launch button to verify the app launches as expected
-2. Use the "Account association" tab to verify the association credentials were created correctly
-3. Use the "Metadata" tab to see the metadata added from the manifest and identify any missing fields
-
-### 2. Publish to Base App
-
-To publish your app, create a post in the Base app with your app's URL.
-
-## Learn More
-
-For detailed step-by-step instructions, see the [Create a Mini App tutorial](https://docs.base.org/docs/mini-apps/quickstart/create-new-miniapp/) in the Base documentation.
+- Swap `icon.png` or add type-specific artwork in `public/`.
+- Adjust prompt scaffolding or type themes in `app/page.tsx`.
+- Extend the `handleForge` logic to persist creations or kick off onchain actions.
+- Fill the `accountAssociation` block in `minikit.config.ts` after signing your manifest with the Farcaster developer tool.
+- Replace the placeholder URLs in the manifest route before submitting to the Base Mini App directory.
