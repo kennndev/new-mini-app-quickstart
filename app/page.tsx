@@ -451,7 +451,7 @@ export default function Home() {
           </div>
           <button
             type="button"
-            className={styles.primaryButton}
+            className={styles.connectButton}
             onClick={handleConnect}
             disabled={connected}
           >
@@ -625,15 +625,6 @@ export default function Home() {
               </button>
               <p className={styles.tinyText}>Available after forging completes.</p>
             </div>
-
-            <aside className={styles.promptHints}>
-              <h3>Prompt Starters</h3>
-              <ul>
-                <li>Energetic water spirit with bioluminescent fins and manga ink outlines.</li>
-                <li>Armored fire tiger with molten stripes, illustrated like a holographic trading card.</li>
-                <li>Mystic psychic fox levitating runes, bold cel-shaded style.</li>
-              </ul>
-            </aside>
           </section>
         </section>
       </section>
