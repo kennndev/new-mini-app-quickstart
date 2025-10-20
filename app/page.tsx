@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useMiniKit } from "@coinbase/onchainkit/minikit";
 import { minikitConfig } from "../minikit.config";
 import styles from "./page.module.css";
@@ -14,6 +15,39 @@ const BASE_SEPOLIA_PARAMS = {
   rpcUrls: ["https://sepolia.base.org"],
   blockExplorerUrls: ["https://sepolia.basescan.org"],
 };
+
+type EthereumRequestArgs = {
+  method: string;
+  params?: unknown[];
+};
+
+type EthereumProvider = {
+  request?: (args: EthereumRequestArgs) => Promise<unknown>;
+};
+
+type SmartWalletResponse = {
+  address?: string | null;
+};
+
+type MiniAppSession = {
+  accounts?: string[];
+  chainId?: string;
+};
+
+type MiniAppBridge = {
+  connect?: (options?: { chainId?: string }) => Promise<MiniAppSession | undefined>;
+  session?: MiniAppSession;
+  smartWallet?: {
+    getSmartWallet?: () => Promise<SmartWalletResponse | null | undefined>;
+  };
+  switchEthereumChain?: (chainId: string) => Promise<void>;
+};
+
+type MiniAppWindow = Window &
+  typeof globalThis & {
+    coinbaseWalletMiniApp?: MiniAppBridge;
+    ethereum?: EthereumProvider;
+  };
 
 const TYPE_THEME: Record<
   string,
@@ -146,21 +180,22 @@ async function computeForgeHash(payload: string) {
     .join("");
 }
 
-async function ensureWalletOnBaseSepolia(provider: any) {
+async function ensureWalletOnBaseSepolia(provider: EthereumProvider) {
   if (!provider?.request) return;
   try {
     await provider.request({
-    method: "wallet_switchEthereumChain",
+      method: "wallet_switchEthereumChain",
       params: [{ chainId: BASE_SEPOLIA_CHAIN_ID }],
     });
-  } catch (error: any) {
-    if (error?.code === 4902 || error?.message?.includes("not found")) {
+  } catch (error) {
+    const err = error as { code?: number; message?: string };
+    if (err?.code === 4902 || err?.message?.includes("not found")) {
       await provider.request({
         method: "wallet_addEthereumChain",
         params: [BASE_SEPOLIA_PARAMS],
       });
     } else {
-      throw error;
+      throw err ?? error;
     }
   }
 }
@@ -207,23 +242,29 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const miniApp = (window as any).coinbaseWalletMiniApp;
-    if (miniApp?.session) {
-      const session = miniApp.session;
-      const accounts = session?.accounts ?? [];
-      const existingAddress = accounts[0] ?? null;
-      setWalletAddress(existingAddress);
-      setConnected(Boolean(existingAddress));
-      setNetwork(session?.chainId ? `Chain ${session.chainId}` : "Base Sepolia");
-      if (miniApp.smartWallet?.getSmartWallet) {
-        miniApp.smartWallet
-          .getSmartWallet()
-          .then((smartWalletResponse: any) => {
-            setSmartWallet(smartWalletResponse?.address ?? null);
-          })
-          .catch(() => {});
+    const { coinbaseWalletMiniApp } = window as MiniAppWindow;
+    if (!coinbaseWalletMiniApp?.session) return;
+
+    const session = coinbaseWalletMiniApp.session;
+    const accounts = session?.accounts ?? [];
+    const existingAddress = accounts[0] ?? null;
+    setWalletAddress(existingAddress);
+    setConnected(Boolean(existingAddress));
+    setNetwork(session?.chainId ? `Chain ${session.chainId}` : "Base Sepolia");
+
+    const fetchSmartWallet = async () => {
+      try {
+        const response = await coinbaseWalletMiniApp.smartWallet?.getSmartWallet?.();
+        if (response && typeof response === "object") {
+          const { address } = response as SmartWalletResponse;
+          setSmartWallet(address ?? null);
+        }
+      } catch (smartWalletError) {
+        console.warn("Smart wallet lookup failed", smartWalletError);
       }
-    }
+    };
+
+    void fetchSmartWallet();
   }, []);
 
   const setFeedback = useCallback((message: string, variant: FeedbackVariant = "muted") => {
@@ -233,11 +274,11 @@ export default function Home() {
 
   const handleConnect = useCallback(async () => {
     if (typeof window === "undefined") return;
-    const miniApp = (window as any).coinbaseWalletMiniApp;
+    const { coinbaseWalletMiniApp, ethereum } = window as MiniAppWindow;
 
     try {
-      if (miniApp?.connect) {
-        const session = await miniApp.connect({ chainId: BASE_SEPOLIA_CHAIN_ID });
+      if (coinbaseWalletMiniApp?.connect) {
+        const session = await coinbaseWalletMiniApp.connect({ chainId: BASE_SEPOLIA_CHAIN_ID });
         const accounts = session?.accounts ?? [];
         const address = accounts[0] ?? null;
         setWalletAddress(address);
@@ -245,41 +286,46 @@ export default function Home() {
         const chainId = session?.chainId ?? BASE_SEPOLIA_CHAIN_ID;
         setNetwork(chainId.toLowerCase() === BASE_SEPOLIA_CHAIN_ID ? "Base Sepolia" : `Chain ${chainId}`);
 
-        if (chainId?.toLowerCase() !== BASE_SEPOLIA_CHAIN_ID && miniApp.switchEthereumChain) {
-          await miniApp.switchEthereumChain(BASE_SEPOLIA_CHAIN_ID);
+        if (chainId?.toLowerCase() !== BASE_SEPOLIA_CHAIN_ID && coinbaseWalletMiniApp.switchEthereumChain) {
+          await coinbaseWalletMiniApp.switchEthereumChain(BASE_SEPOLIA_CHAIN_ID);
           setNetwork("Base Sepolia");
         }
 
-        if (miniApp.smartWallet?.getSmartWallet) {
-          try {
-            const smartWalletResponse = await miniApp.smartWallet.getSmartWallet();
-            setSmartWallet(smartWalletResponse?.address ?? null);
-          } catch (error) {
-            console.warn("Smart wallet lookup failed", error);
+        try {
+          const response = await coinbaseWalletMiniApp.smartWallet?.getSmartWallet?.();
+          if (response && typeof response === "object") {
+            const { address: smartWalletAddress } = response as SmartWalletResponse;
+            setSmartWallet(smartWalletAddress ?? null);
           }
+        } catch (smartWalletError) {
+          console.warn("Smart wallet lookup failed", smartWalletError);
         }
+
         setFeedback("Wallet connected.", "success");
         return;
       }
 
-      if ((window as any).ethereum?.request) {
-        const provider = (window as any).ethereum;
-        const accounts = await provider.request({ method: "eth_requestAccounts" });
-        const address = accounts?.[0] ?? null;
+      if (ethereum?.request) {
+        const accountsResult = await ethereum.request({ method: "eth_requestAccounts" });
+        const accounts = Array.isArray(accountsResult) ? (accountsResult as string[]) : [];
+        const address = accounts[0] ?? null;
         setWalletAddress(address);
         setConnected(Boolean(address));
 
-        await ensureWalletOnBaseSepolia(provider);
-        const chainId = await provider.request({ method: "eth_chainId" });
-        setNetwork(chainId === BASE_SEPOLIA_CHAIN_ID ? "Base Sepolia" : `Chain ${chainId}`);
+        await ensureWalletOnBaseSepolia(ethereum);
+        const chainIdResult = await ethereum.request({ method: "eth_chainId" });
+        const chainId =
+          typeof chainIdResult === "string" ? chainIdResult : BASE_SEPOLIA_CHAIN_ID;
+        setNetwork(chainId.toLowerCase() === BASE_SEPOLIA_CHAIN_ID ? "Base Sepolia" : `Chain ${chainId}`);
         setFeedback("Wallet connected.", "success");
         return;
       }
 
       setFeedback("Wallet provider not detected in this environment.", "error");
-    } catch (error: any) {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect wallet.";
       console.error(error);
-      setFeedback(error?.message ?? "Failed to connect wallet.", "error");
+      setFeedback(message, "error");
     }
   }, [setFeedback]);
 
@@ -362,9 +408,10 @@ export default function Home() {
         setCardHash(`Forge hash ${hash.slice(0, 10)}…`);
         setDownloadEnabled(true);
         setFeedback("Success! Creature forged on Base inspiration.", "success");
-      } catch (error: any) {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to forge creature.";
         console.error(error);
-        setFeedback(error?.message ?? "Failed to forge creature.", "error");
+        setFeedback(message, "error");
         setDownloadEnabled(false);
       } finally {
         setIsGenerating(false);
@@ -389,7 +436,14 @@ export default function Home() {
       <section className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.brand}>
-            <img src="/icon.png" alt="Cardify" className={styles.brandLogo} />
+            <Image
+              src="/icon.png"
+              alt="Cardify"
+              width={56}
+              height={56}
+              className={styles.brandLogo}
+              priority
+            />
             <div className={styles.brandTitle}>
               <h1>{appName}</h1>
               <p className={styles.tagline}>Welcome back, {greeting}! Ready to forge a legend?</p>
@@ -523,11 +577,15 @@ export default function Home() {
                 <span className={styles.level}>{cardLevel}</span>
               </header>
 
-              <div
-                className={styles.cardImage}
-                style={{ boxShadow: `0 0 32px ${theme.accent}` }}
-              >
-                <img src={cardImage} alt="Generated creature" />
+              <div className={styles.cardImage} style={{ boxShadow: `0 0 32px ${theme.accent}` }}>
+                <Image
+                  src={cardImage}
+                  alt="Generated creature"
+                  fill
+                  sizes="(max-width: 520px) 90vw, 480px"
+                  className={styles.cardImageAsset}
+                  unoptimized
+                />
               </div>
 
               <section className={styles.stats}>

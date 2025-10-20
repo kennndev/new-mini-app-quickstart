@@ -36,6 +36,8 @@
 .brandLogo {
   width: 56px;
   height: 56px;
+  border-radius: 16px;
+  object-fit: cover;
 }
 
 .brandTitle {
@@ -277,9 +279,7 @@
   background: radial-gradient(circle at center, rgba(94, 160, 255, 0.25), transparent 60%);
 }
 
-.cardImage img {
-  width: 100%;
-  height: 100%;
+.cardImageAsset {
   object-fit: cover;
 }
 
