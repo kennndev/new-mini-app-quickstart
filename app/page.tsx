@@ -192,7 +192,7 @@ export default function Home() {
 
   const [cardName, setCardName] = useState("???");
   const [cardImage, setCardImage] = useState(PLACEHOLDER_IMAGE);
-const [cardHash, setCardHash] = useState("Awaiting signature");
+const [cardHash, _setCardHash] = useState("Awaiting signature");
   const [moveDescription, setMoveDescription] = useState(
     "Forge an ally to unlock their legend. Generated art will appear here after creation.",
   );
@@ -377,7 +377,7 @@ const [cardHash, setCardHash] = useState("Awaiting signature");
           throw new Error("No image returned from generator.");
         }
 
-        const hash = await computeForgeHash(
+        const _hash = await computeForgeHash(
           JSON.stringify({
             address: walletAddress,
             name: creatureName,
@@ -444,12 +444,13 @@ const [cardHash, setCardHash] = useState("Awaiting signature");
       <section className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.brand}>
-            <img
+            <Image
               src="/icon.png"
               alt="Cardify"
               width={56}
               height={56}
               className={styles.brandLogo}
+              unoptimized
             />
             <div className={styles.brandTitle}>
               <h1>{appName}</h1>
