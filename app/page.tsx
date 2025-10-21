@@ -8,6 +8,7 @@ import styles from "./page.module.css";
 
 const BASE_SEPOLIA_CHAIN_ID = "0x14a34";
 
+
 const BASE_SEPOLIA_PARAMS = {
   chainId: BASE_SEPOLIA_CHAIN_ID,
   chainName: "Base Sepolia",
@@ -36,6 +37,7 @@ type MiniAppSession = {
 
 type MiniAppBridge = {
   connect?: (options?: { chainId?: string }) => Promise<MiniAppSession | undefined>;
+  disconnect?: () => Promise<void>;
   session?: MiniAppSession;
   smartWallet?: {
     getSmartWallet?: () => Promise<SmartWalletResponse | null | undefined>;
@@ -93,42 +95,18 @@ const ELEMENT_OPTIONS = [
   "Shadow",
 ] as const;
 
-const PLACEHOLDER_IMAGE = "https://assets.bcb.dev/base-miniapps/poke-placeholder.png";
 
 type ElementOption = (typeof ELEMENT_OPTIONS)[number];
 type FeedbackVariant = "muted" | "success" | "error";
-
-interface StatsState {
-  power: string;
-  defense: string;
-  aether: string;
-}
-
-const initialStats: StatsState = {
-  power: "--",
-  defense: "--",
-  aether: "--",
-};
 
 function formatAddress(address: string | null): string {
   if (!address) return "Not connected";
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-function generateStats(seed: string) {
-  let hash = 0;
-  const normalized = `${seed}-${BASE_SEPOLIA_CHAIN_ID}`;
-  for (let i = 0; i < normalized.length; i += 1) {
-    hash = (hash << 5) - hash + normalized.charCodeAt(i);
-    hash |= 0;
-  }
-  const base = Math.abs(hash);
-  return {
-    power: 65 + (base % 36),
-    defense: 58 + ((base >> 3) % 33),
-    aether: 60 + ((base >> 5) % 28),
-  };
-}
+const PLACEHOLDER_IMAGE = "/placeholder.jpg";
+
+
 
 function composeTrainerPrompt({
   creatureName,
@@ -156,7 +134,7 @@ function buildGenerationPrompt({
   const intro =
     "Create a full-bleed trading card artwork that extends to every edge with sharp 90-degree corners. Portrait orientation 2.5:3.5.";
   const subject = `Subject: ${creatureName}, a ${elementType.toLowerCase()}-type companion performing the signature move "${signatureMove}".`;
-  const userInspiration = `Trainer prompt: ${basePrompt}`;
+  const userInspiration = `prompt: ${basePrompt}`;
   const style = `Art style: ${ART_STYLE.stylePrompt}.`;
   const frame = `Frame implementation: ${FRAME_STYLE.framePrompt}`;
   const textLayout = `Card text elements: ${FRAME_STYLE.textPrompt}`;
@@ -214,9 +192,7 @@ export default function Home() {
 
   const [cardName, setCardName] = useState("???");
   const [cardImage, setCardImage] = useState(PLACEHOLDER_IMAGE);
-  const [cardLevel, setCardLevel] = useState("LV.0");
-  const [cardHash, setCardHash] = useState("Awaiting signature");
-  const [stats, setStats] = useState<StatsState>(initialStats);
+const [cardHash, setCardHash] = useState("Awaiting signature");
   const [moveDescription, setMoveDescription] = useState(
     "Forge an ally to unlock their legend. Generated art will appear here after creation.",
   );
@@ -225,9 +201,10 @@ export default function Home() {
   const [downloadEnabled, setDownloadEnabled] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackVariant, setFeedbackVariant] = useState<FeedbackVariant>("muted");
+  const [showConfetti, setShowConfetti] = useState(false);
 
   const appName = minikitConfig.miniapp?.name ?? "Cardify";
-  const greeting = context?.user?.displayName ? `${context.user.displayName}` : "Trainer";
+  const greeting = context?.user?.displayName ? `${context.user.displayName}` : "";
 
   const theme = useMemo(
     () => TYPE_THEME[elementType] ?? { color: "#f4f8ff", accent: "rgba(255,255,255,0.18)" },
@@ -329,6 +306,23 @@ export default function Home() {
     }
   }, [setFeedback]);
 
+  const handleDisconnect = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    const { coinbaseWalletMiniApp } = window as MiniAppWindow;
+
+    try {
+      await coinbaseWalletMiniApp?.disconnect?.();
+    } catch (error) {
+      console.warn("Mini app disconnect failed", error);
+    }
+
+    setWalletAddress(null);
+    setNetwork(null);
+    setSmartWallet(null);
+    setConnected(false);
+    setFeedback("Wallet disconnected.", "muted");
+  }, [setFeedback]);
+
   const handleForge = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -383,8 +377,6 @@ export default function Home() {
           throw new Error("No image returned from generator.");
         }
 
-        const forgedStats = generateStats(`${creatureName}-${elementType}-${signatureMove}-${trainerPrompt}`);
-        const level = Math.min(99, Math.round((forgedStats.power + forgedStats.defense + forgedStats.aether) / 3));
         const hash = await computeForgeHash(
           JSON.stringify({
             address: walletAddress,
@@ -398,16 +390,13 @@ export default function Home() {
 
         setCardName(creatureName);
         setCardImage(generatedImage);
-        setCardLevel(`LV.${level}`);
-        setStats({
-          power: String(forgedStats.power),
-          defense: String(forgedStats.defense),
-          aether: String(forgedStats.aether),
-        });
         setMoveDescription(trainerPrompt);
-        setCardHash(`Forge hash ${hash.slice(0, 10)}…`);
         setDownloadEnabled(true);
         setFeedback("Success! Creature forged on Base inspiration.", "success");
+        
+        // Trigger confetti blast
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 3000);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to forge creature.";
         console.error(error);
@@ -433,30 +422,57 @@ export default function Home() {
 
   return (
     <main className={styles.container}>
+      {showConfetti && (
+        <div className={styles.confettiBlast}>
+          {Array.from({ length: 20 }, (_, i) => {
+            const angle = (i * 18) % 360; // 20 pieces, 18 degrees apart
+            const distance = 150 + Math.random() * 100; // Random distance between 150-250px
+            return (
+              <div 
+                key={i} 
+                className={styles.confetti}
+                style={{
+                  '--angle': `${angle}deg`,
+                  '--distance': `${distance}px`,
+                  animationDelay: `${i * 0.05}s`,
+                } as React.CSSProperties}
+              />
+            );
+          })}
+        </div>
+      )}
       <section className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.brand}>
-            <Image
+            <img
               src="/icon.png"
               alt="Cardify"
               width={56}
               height={56}
               className={styles.brandLogo}
-              priority
             />
             <div className={styles.brandTitle}>
               <h1>{appName}</h1>
-              <p className={styles.tagline}>Welcome back, {greeting}! Ready to forge a legend?</p>
+              <p className={styles.tagline}>Welcome back {greeting}!</p>
             </div>
           </div>
-          <button
-            type="button"
-            className={styles.connectButton}
-            onClick={handleConnect}
-            disabled={connected}
-          >
-            {connected ? "Wallet Linked" : "Connect Wallet"}
-          </button>
+          {connected ? (
+            <button
+              type="button"
+              className={styles.disconnectButton}
+              onClick={handleDisconnect}
+            >
+              Disconnect
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.connectButton}
+              onClick={handleConnect}
+            >
+              Connect Wallet
+            </button>
+          )}
         </header>
 
         <section className={styles.statusStrip}>
@@ -482,14 +498,10 @@ export default function Home() {
 
         <section className={styles.layout}>
           <form className={styles.panel} onSubmit={handleForge}>
-            <h2 className={styles.panelTitle}>Trainer Console</h2>
-            <p className={styles.formHelper}>
-              Describe your ally and we’ll craft the card using a curated Base Sepolia prompt.
-            </p>
-
+       
             <div className={styles.fieldGrid}>
               <div className={styles.field}>
-                <label htmlFor="creatureName">Creature Name</label>
+                <label htmlFor="creatureName">Card Name</label>
                 <input
                   id="creatureName"
                   className={styles.input}
@@ -574,57 +586,61 @@ export default function Home() {
                     Type: {elementType}
                   </span>
                 </div>
-                <span className={styles.level}>{cardLevel}</span>
+                <span className={styles.level}></span>
               </header>
 
-              <div className={styles.cardImage} style={{ boxShadow: `0 0 32px ${theme.accent}` }}>
-                <Image
-                  src={cardImage}
-                  alt="Generated creature"
-                  fill
-                  sizes="(max-width: 520px) 90vw, 480px"
-                  className={styles.cardImageAsset}
-                  unoptimized
-                />
-              </div>
+              <div 
+                className={`${styles.cardImage} ${
+                  isGenerating 
+                    ? styles.generating 
+                    : cardImage === PLACEHOLDER_IMAGE 
+                    ? styles.placeholder 
+                    : ''
+                }`} 
+                style={{ boxShadow: `0 0 32px ${theme.accent}` }}
+              >
+  <Image
+    src={cardImage && typeof cardImage === "string" && cardImage.trim() !== "" 
+      ? cardImage 
+      : PLACEHOLDER_IMAGE}
+    alt={cardImage && cardImage !== PLACEHOLDER_IMAGE ? "Generated creature" : "Placeholder image"}
+    fill
+    sizes="(max-width: 520px) 90vw, 480px"
+    className={styles.cardImageAsset}
+    unoptimized
+    onError={(e) => {
+      // if image fails to load, replace with placeholder
+      (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMAGE;
+    }}
+  />
+</div>
 
-              <section className={styles.stats}>
-                <div>
-                  <span className={styles.statLabel}>Power</span>
-                  <span className={styles.statValue}>{stats.power}</span>
-                </div>
-                <div>
-                  <span className={styles.statLabel}>Defense</span>
-                  <span className={styles.statValue}>{stats.defense}</span>
-                </div>
-                <div>
-                  <span className={styles.statLabel}>Aether</span>
-                  <span className={styles.statValue}>{stats.aether}</span>
-                </div>
-              </section>
-
-              <div className={styles.moveBlock}>
+                   <div className={styles.moveBlock}>
                 <h4>{signatureMove || "Signature Move"}</h4>
                 <p>{moveDescription}</p>
               </div>
 
               <footer className={styles.cardFooter}>
                 <span className={styles.footerTag}>Chain: Base Sepolia</span>
-                <span className={styles.footerTag}>{cardHash}</span>
+                {downloadEnabled && cardImage !== PLACEHOLDER_IMAGE ? (
+                  <button
+                    type="button"
+                    className={styles.downloadIcon}
+                    onClick={handleDownload}
+                    title="Download Card"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7,10 12,15 17,10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  </button>
+                ) : (
+                  <span className={styles.footerTag}>{cardHash}</span>
+                )}
               </footer>
             </article>
 
-            <div className={styles.actionRow}>
-              <button
-                type="button"
-                className={styles.primaryButton}
-                onClick={handleDownload}
-                disabled={!downloadEnabled}
-              >
-                Download Card
-              </button>
-              <p className={styles.tinyText}>Available after forging completes.</p>
-            </div>
           </section>
         </section>
       </section>
