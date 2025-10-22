@@ -378,7 +378,7 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
       if (currentAllowance < parseInt(amount)) {
         const approveData = `0x095ea7b3${receivingWallet.slice(2).padStart(64, '0')}${parseInt(amount).toString(16).padStart(64, '0')}`;
         
-        const approveTxHash = await ethereum.request({
+        await ethereum.request({
           method: "eth_sendTransaction",
           params: [{
             from: walletAddress,
@@ -437,7 +437,7 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
               throw new Error("Payment transaction failed on-chain.");
             }
           }
-        } catch (pollError) {
+        } catch {
           // Continue polling unless timeout is reached.
         }
 
