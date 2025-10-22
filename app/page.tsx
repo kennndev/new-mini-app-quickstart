@@ -323,6 +323,134 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
     setFeedback("Wallet disconnected.", "muted");
   }, [setFeedback]);
 
+  const handlePayment = useCallback(async () => {
+    if (typeof window === "undefined") {
+      throw new Error("Window not available");
+    }
+    
+    if (!walletAddress) {
+      throw new Error("Wallet not connected");
+    }
+    
+    const { ethereum } = window as MiniAppWindow;
+    if (!ethereum?.request) {
+      throw new Error("Ethereum provider not available");
+    }
+
+    try {
+      // USDC contract on Base Sepolia
+      const usdcContract = process.env.NEXT_PUBLIC_USDC_CONTRACT || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+      const receivingWallet = process.env.NEXT_PUBLIC_RECEIVING_WALLET_ADDRESS || "0xD0D2e2206E44f818006ebC19F2fDB16a80a0d1fB";
+      const amount = "1000000"; // $1 USDC (6 decimals)
+      
+ 
+      
+      
+      // First, check USDC balance
+      const balanceData = `0x70a08231${walletAddress.slice(2).padStart(64, '0')}`;
+      const balance = await ethereum.request({
+        method: "eth_call",
+        params: [{
+          to: usdcContract,
+          data: balanceData
+        }]
+      });
+
+      const currentBalance = parseInt(balance, 16);
+      
+      if (currentBalance < parseInt(amount)) {
+        throw new Error("Insufficient USDC balance");
+      }
+
+      // Check allowance
+      const allowanceData = `0xdd62ed3e${walletAddress.slice(2).padStart(64, '0')}${receivingWallet.slice(2).padStart(64, '0')}`;
+      const allowance = await ethereum.request({
+        method: "eth_call",
+        params: [{
+          to: usdcContract,
+          data: allowanceData
+        }]
+      });
+
+      const currentAllowance = parseInt(allowance, 16);
+
+      // If allowance is insufficient, approve first
+      if (currentAllowance < parseInt(amount)) {
+        const approveData = `0x095ea7b3${receivingWallet.slice(2).padStart(64, '0')}${parseInt(amount).toString(16).padStart(64, '0')}`;
+        
+        const approveTxHash = await ethereum.request({
+          method: "eth_sendTransaction",
+          params: [{
+            from: walletAddress,
+            to: usdcContract,
+            data: approveData,
+          }],
+        });
+        
+        // Wait for approval to be mined
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+
+      // Now transfer USDC
+      const transferData = `0xa9059cbb${receivingWallet.slice(2).padStart(64, '0')}${parseInt(amount).toString(16).padStart(64, '0')}`;
+      
+      const txHash = await ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{
+          from: walletAddress,
+          to: usdcContract,
+          data: transferData,
+        }],
+      });
+
+
+      if (!txHash || typeof txHash !== "string") {
+        throw new Error("Failed to submit payment transaction.");
+      }
+
+      setFeedback("Waiting for payment confirmation...", "muted");
+
+      const pollIntervalMs = 4000;
+      const timeoutMs = 120000; // 2 minutes
+      const start = Date.now();
+
+      const wait = (ms: number) =>
+        new Promise((resolve) => {
+          setTimeout(resolve, ms);
+        });
+
+      while (Date.now() - start < timeoutMs) {
+        try {
+          const receipt = (await ethereum.request({
+            method: "eth_getTransactionReceipt",
+            params: [txHash],
+          })) as { status?: string } | null;
+
+          if (receipt) {
+            const status = receipt.status?.toLowerCase();
+
+            if (status === "0x1" || status === "1" || status === "success") {
+              return txHash;
+            }
+
+            if (status === "0x0" || status === "0" || status === "failed") {
+              throw new Error("Payment transaction failed on-chain.");
+            }
+          }
+        } catch (pollError) {
+          // Continue polling unless timeout is reached.
+        }
+
+        await wait(pollIntervalMs);
+      }
+
+      throw new Error("Timed out waiting for payment confirmation.");
+    } catch (error) {
+      console.error("Payment failed:", error);
+      throw error;
+    }
+  }, [setFeedback, walletAddress]);
+
   const handleForge = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -340,9 +468,17 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
 
       setIsGenerating(true);
       setDownloadEnabled(false);
-      setFeedback("Summoning art from the aether…", "muted");
+      setFeedback("Processing payment of $1 USDC...", "muted");
 
       try {
+        // First, process payment
+        const paymentTxHash = await handlePayment();
+        if (!paymentTxHash) {
+          throw new Error("Payment failed");
+        }
+
+        setFeedback("Payment confirmed! Generating your creature...", "muted");
+
         const trainerPrompt = composeTrainerPrompt({
           creatureName,
           elementType,
@@ -362,16 +498,18 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
           },
           body: JSON.stringify({
             prompt: enrichedPrompt,
+            walletAddress,
+            paymentTxHash,
             meta: { creatureName, elementType, signatureMove },
           }),
         });
 
-        if (!response.ok) {
-          const errorBody = await response.json().catch(() => ({}));
-          throw new Error(errorBody?.error ?? "Image generation failed.");
-        }
-
         const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data?.error || "Image generation failed.");
+        }
+        
         const generatedImage = data?.image;
         if (!generatedImage || typeof generatedImage !== "string") {
           throw new Error("No image returned from generator.");
@@ -406,7 +544,7 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
         setIsGenerating(false);
       }
     },
-    [connected, creatureName, elementType, signatureMove, walletAddress, setFeedback],
+    [connected, creatureName, elementType, signatureMove, walletAddress, setFeedback, handlePayment],
   );
 
   const handleDownload = useCallback(() => {
@@ -555,10 +693,15 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
                 <strong>Anime Cel-Shaded</strong>
                 <p>Vibrant energy, bold outlines, and cinematic lighting.</p>
               </div>
+              <div className={styles.stylePill}>
+                <span className={styles.styleLabel}>Cost</span>
+                <strong>$1 USDC</strong>
+                <p>Pay with USDC on Base Sepolia to generate your creature.</p>
+              </div>
             </section>
 
             <button className={styles.primaryButton} type="submit" disabled={isGenerating}>
-              {isGenerating ? "Forging…" : "Forge Creature"}
+              {isGenerating ? "Processing…" : "Pay $1 USDC & Forge Creature"}
             </button>
             <p
               className={`${styles.feedback} ${
@@ -596,10 +739,10 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
                     ? styles.generating 
                     : cardImage === PLACEHOLDER_IMAGE 
                     ? styles.placeholder 
-                    : ''
-                }`} 
-                style={{ boxShadow: `0 0 32px ${theme.accent}` }}
-              >
+              : ''
+            }`} 
+            style={{ boxShadow: `0 0 32px ${theme.accent}` }}
+          >
   <Image
     src={cardImage && typeof cardImage === "string" && cardImage.trim() !== "" 
       ? cardImage 
@@ -614,11 +757,22 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
       (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMAGE;
     }}
   />
+  {isGenerating && (
+    <div className={styles.imageLoader}>
+      <div className={styles.loaderGlow}>
+        <div className={styles.loaderCore} />
+      </div>
+      <p className={styles.loaderText}>
+        Forging artwork…
+        <span>Hanging tight while your creature materializes</span>
+      </p>
+    </div>
+  )}
 </div>
 
-                   <div className={styles.moveBlock}>
-                <h4>{signatureMove || "Signature Move"}</h4>
-                <p>{moveDescription}</p>
+               <div className={styles.moveBlock}>
+              <h4>{signatureMove || "Signature Move"}</h4>
+              <p>{moveDescription}</p>
               </div>
 
               <footer className={styles.cardFooter}>
