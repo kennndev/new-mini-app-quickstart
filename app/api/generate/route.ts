@@ -1,43 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseEther, formatEther } from "viem";
-import { createPublicClient, http, getContract } from "viem";
+import { parseEther } from "viem";
+import { createPublicClient, http } from "viem";
 import { baseSepolia } from "viem/chains";
-
-// USDC contract on Base Sepolia
-const USDC_CONTRACT_ADDRESS = process.env.USDC_CONTRACT_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-const USDC_ABI = [
-  {
-    "inputs": [
-      {"name": "from", "type": "address"},
-      {"name": "to", "type": "address"},
-      {"name": "value", "type": "uint256"}
-    ],
-    "name": "transferFrom",
-    "outputs": [{"name": "", "type": "bool"}],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {"name": "owner", "type": "address"},
-      {"name": "spender", "type": "address"}
-    ],
-    "name": "allowance",
-    "outputs": [{"name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {"name": "spender", "type": "address"},
-      {"name": "amount", "type": "uint256"}
-    ],
-    "name": "approve",
-    "outputs": [{"name": "", "type": "bool"}],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  }
-] as const;
 
 export async function POST(request: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -221,10 +185,16 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ image: `data:image/png;base64,${base64}` });
   } catch (error) {
-    // Properly use the caught error so ESLint won’t complain
+    console.error("Image generation error:", error);
     return NextResponse.json(
       { error: "Unexpected server error occurred." },
       { status: 500 }
     );
   }
 }
+
+
+
+
+
+
