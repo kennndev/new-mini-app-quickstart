@@ -105,8 +105,9 @@ function formatAddress(address: string | null): string {
 }
 
 const PLACEHOLDER_IMAGE = "/placeholder.jpg";
-
-
+const ESTIMATED_GENERATION_SECONDS = 45;
+const LOADER_GAUGE_RADIUS = 52;
+const LOADER_GAUGE_CIRCUMFERENCE = 2 * Math.PI * LOADER_GAUGE_RADIUS;
 
 function composeTrainerPrompt({
   creatureName,
@@ -198,6 +199,7 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
   );
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationElapsed, setGenerationElapsed] = useState(0);
   const [downloadEnabled, setDownloadEnabled] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackVariant, setFeedbackVariant] = useState<FeedbackVariant>("muted");
@@ -211,11 +213,48 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
     [elementType],
   );
 
+  const clampedElapsed = Math.max(0, Math.min(generationElapsed, 599));
+  const generationProgress = Math.min(generationElapsed / ESTIMATED_GENERATION_SECONDS, 1);
+  const progressPercent = Math.min(Math.round(generationProgress * 100), 100);
+  const timerMinutes = Math.floor(clampedElapsed / 60)
+    .toString()
+    .padStart(2, "0");
+  const timerSeconds = (clampedElapsed % 60).toString().padStart(2, "0");
+  const timerLabel = `${timerMinutes}:${timerSeconds}`;
+  const estimatedRemaining = Math.max(ESTIMATED_GENERATION_SECONDS - generationElapsed, 0);
+  const loaderStatus =
+    generationProgress < 1
+      ? `~${estimatedRemaining}s remaining | ${progressPercent}%`
+      : "Finishing touches...";
+  const loaderStrokeDashoffset = Math.max(0, LOADER_GAUGE_CIRCUMFERENCE * (1 - generationProgress));
+
   useEffect(() => {
     if (!isFrameReady) {
       setFrameReady();
     }
   }, [isFrameReady, setFrameReady]);
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setGenerationElapsed(0);
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setGenerationElapsed(0);
+    const start = Date.now();
+    const intervalId = window.setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - start) / 1000);
+      setGenerationElapsed(elapsedSeconds);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isGenerating]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -466,7 +505,6 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
         return;
       }
 
-      setIsGenerating(true);
       setDownloadEnabled(false);
       setFeedback("Processing payment of $1 USDC...", "muted");
 
@@ -477,6 +515,8 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
           throw new Error("Payment failed");
         }
 
+        // Only start generation timer after payment is confirmed
+        setIsGenerating(true);
         setFeedback("Payment confirmed! Generating your creature...", "muted");
 
         const trainerPrompt = composeTrainerPrompt({
@@ -701,7 +741,7 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
             </section>
 
             <button className={styles.primaryButton} type="submit" disabled={isGenerating}>
-              {isGenerating ? "Processing…" : "Pay $1 USDC & Forge Creature"}
+              {isGenerating ? "Generating…" : "Pay $1 USDC & Forge Creature"}
             </button>
             <p
               className={`${styles.feedback} ${
@@ -759,11 +799,32 @@ const [cardHash, _setCardHash] = useState("Awaiting signature");
   />
   {isGenerating && (
     <div className={styles.imageLoader}>
-      <div className={styles.loaderGlow}>
-        <div className={styles.loaderCore} />
+      <div className={styles.loaderMeter}>
+        <svg
+          className={styles.loaderGauge}
+          viewBox="0 0 120 120"
+          role="presentation"
+          aria-hidden="true"
+        >
+          <circle className={styles.loaderGaugeTrack} cx="60" cy="60" r="52" />
+          <circle
+            className={styles.loaderGaugeProgress}
+            cx="60"
+            cy="60"
+            r="52"
+            style={{
+              strokeDasharray: `${LOADER_GAUGE_CIRCUMFERENCE}`,
+              strokeDashoffset: `${loaderStrokeDashoffset}`,
+            }}
+          />
+        </svg>
+        <div className={styles.loaderTimer}>
+          <span className={styles.loaderSeconds}>{timerLabel}</span>
+          <span className={styles.loaderEta}>{loaderStatus}</span>
+        </div>
       </div>
       <p className={styles.loaderText}>
-        Forging artwork…
+        Forging artwork...
         <span>Hanging tight while your creature materializes</span>
       </p>
     </div>
